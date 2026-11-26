@@ -1,9 +1,16 @@
--- Superman Fly v2 (minimized, CoreGui + MainCore)
+-- Superman Fly v2 (minimized, CoreGui + MainCore, re-execute safe)
 local Players = game:GetService("Players")
 local UIS = game:GetService("UserInputService")
 local RS = game:GetService("RunService")
 local TS = game:GetService("TweenService")
 local WS = game:GetService("Workspace")
+
+-- Unload previous instance if it exists
+local UNLOAD_KEY = "__SupermanFlyV2_Unload"
+if _G[UNLOAD_KEY] then
+    pcall(_G[UNLOAD_KEY])
+    _G[UNLOAD_KEY] = nil
+end
 
 local plr = Players.LocalPlayer
 local char = plr.Character or plr.CharacterAdded:Wait()
@@ -20,6 +27,7 @@ local lerpC = 0.1
 local bobFreq, bobAmp = 1, 0.5
 local fConns, gConns = {}, {}
 local animTrack
+local closed = false
 
 local function setNoclip(on)
     for _, p in ipairs(char:GetDescendants()) do
@@ -55,6 +63,10 @@ end
 local CoreGui
 pcall(function() CoreGui = game:GetService("CoreGui") end)
 local guiParent = CoreGui or plr:WaitForChild("PlayerGui")
+
+-- Remove any leftover GUI from a prior run (safety net)
+local existing = guiParent:FindFirstChild("FlyGui")
+if existing then existing:Destroy() end
 
 local gui = new("ScreenGui", {Name="FlyGui", ResetOnSpawn=false}, guiParent)
 
@@ -116,9 +128,10 @@ mainCore.InputChanged:Connect(function(i)
         mainCore.Position = UDim2.new(dragPos.X.Scale, dragPos.X.Offset+d.X, dragPos.Y.Scale, dragPos.Y.Offset+d.Y)
     end
 end)
-UIS.InputEnded:Connect(function(i)
+local dragEndConn = UIS.InputEnded:Connect(function(i)
     if i.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
 end)
+table.insert(gConns, dragEndConn)
 
 --------------------------------------------------
 -- Speed & Keybind UI
@@ -252,19 +265,31 @@ toggleBtn.MouseButton1Click:Connect(toggleFlight)
 --------------------------------------------------
 -- Character respawn
 --------------------------------------------------
-plr.CharacterAdded:Connect(function(nc)
+local charConn = plr.CharacterAdded:Connect(function(nc)
     char = nc
     hum = nc:WaitForChild("Humanoid")
     hrp = nc:WaitForChild("HumanoidRootPart")
     if flying then stopFlight() end
 end)
+table.insert(gConns, charConn)
 
 --------------------------------------------------
--- Close
+-- Cleanup (shared by Close button + re-execute unload)
 --------------------------------------------------
-closeBtn.MouseButton1Click:Connect(function()
+local function cleanup()
+    if closed then return end
+    closed = true
     if flying then stopFlight() end
     for _, c in ipairs(gConns) do if c.Connected then c:Disconnect() end end
-    gui:Destroy()
-    script:Destroy()
+    for _, c in ipairs(fConns) do if c.Connected then c:Disconnect() end end
+    fConns, gConns = {}, {}
+    if gui then gui:Destroy() end
+    if _G[UNLOAD_KEY] == cleanup then _G[UNLOAD_KEY] = nil end
+end
+
+_G[UNLOAD_KEY] = cleanup
+
+closeBtn.MouseButton1Click:Connect(function()
+    cleanup()
+    pcall(function() script:Destroy() end)
 end)
